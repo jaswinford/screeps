@@ -49,7 +49,24 @@ var roleWorker = {
      * @param {Creep} creep - The creep to run the harvesting logic on
      */
     runHarvester: function(creep) {
-        if(creep.store.getFreeCapacity() > 0) {
+        // Initialize gathering flag if not set
+        if(creep.memory.gathering === undefined) {
+            creep.memory.gathering = creep.store.getFreeCapacity() > 0;
+        }
+
+        // If we're gathering and we're full, stop gathering
+        if(creep.memory.gathering && creep.store.getFreeCapacity() == 0) {
+            creep.memory.gathering = false;
+            creep.say('🚚 deliver');
+        }
+
+        // If we're not gathering and we're empty, start gathering
+        if(!creep.memory.gathering && creep.store[RESOURCE_ENERGY] == 0) {
+            creep.memory.gathering = true;
+            creep.say('🔄 harvest');
+        }
+
+        if(creep.memory.gathering) {
             utils.collectEnergy(creep);
         }
         else {
@@ -79,7 +96,24 @@ var roleWorker = {
      * @param {Creep} creep - The creep to run the upgrading logic on
      */
     runUpgrader: function(creep) {
-        if(creep.store[RESOURCE_ENERGY] == 0) {
+        // Initialize gathering flag if not set
+        if(creep.memory.gathering === undefined) {
+            creep.memory.gathering = creep.store[RESOURCE_ENERGY] == 0;
+        }
+
+        // If we're gathering and we're full, stop gathering
+        if(creep.memory.gathering && creep.store.getFreeCapacity() == 0) {
+            creep.memory.gathering = false;
+            creep.say('⚡ upgrade');
+        }
+
+        // If we're not gathering and we're empty, start gathering
+        if(!creep.memory.gathering && creep.store[RESOURCE_ENERGY] == 0) {
+            creep.memory.gathering = true;
+            creep.say('🔄 harvest');
+        }
+
+        if(creep.memory.gathering) {
             utils.collectEnergy(creep);
         }
         else {
@@ -94,7 +128,24 @@ var roleWorker = {
      * @param {Creep} creep - The creep to run the building logic on
      */
     runBuilder: function(creep) {
-        if(creep.store[RESOURCE_ENERGY] == 0) {
+        // Initialize gathering flag if not set
+        if(creep.memory.gathering === undefined) {
+            creep.memory.gathering = creep.store[RESOURCE_ENERGY] == 0;
+        }
+
+        // If we're gathering and we're full, stop gathering
+        if(creep.memory.gathering && creep.store.getFreeCapacity() == 0) {
+            creep.memory.gathering = false;
+            creep.say('🚧 build');
+        }
+
+        // If we're not gathering and we're empty, start gathering
+        if(!creep.memory.gathering && creep.store[RESOURCE_ENERGY] == 0) {
+            creep.memory.gathering = true;
+            creep.say('🔄 harvest');
+        }
+
+        if(creep.memory.gathering) {
             utils.collectEnergy(creep);
         }
         else {
@@ -164,6 +215,9 @@ var roleWorker = {
 
         // We prioritize the current task and only switch when there are no more tasks available
         // This is handled in the individual role functions (runHarvester, runBuilder)
+
+        // Each role function uses a 'gathering' flag to ensure workers don't stop gathering energy
+        // until they are completely full, as per the requirement
 
         // Run the appropriate role logic
         if(creep.memory.currentTask === 'harvesting') {
