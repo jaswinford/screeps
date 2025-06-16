@@ -1,6 +1,4 @@
-var roleHarvester = require('role.harvester');
-var roleUpgrader = require('role.upgrader');
-var roleBuilder = require('role.builder');
+var roleWorker = require('role.worker');
 var config = require('config');
 var utils = require('utils');
 
@@ -23,9 +21,12 @@ module.exports.loop = function () {
     // Check for high traffic areas and build roads
     utils.buildRoadsOnHighTraffic();
 
-    var harvesters = _.filter(Game.creeps, (creep) => creep.memory.role == 'harvester');
-    var builders = _.filter(Game.creeps, (creep) => creep.memory.role == 'builder');
-    var upgraders = _.filter(Game.creeps, (creep) => creep.memory.role == 'upgrader');
+    var workers = _.filter(Game.creeps, (creep) => creep.memory.role == 'worker');
+
+    // Count workers by current task
+    var harvesters = _.filter(Game.creeps, (creep) => creep.memory.role == 'worker' && creep.memory.currentTask == 'harvesting');
+    var upgraders = _.filter(Game.creeps, (creep) => creep.memory.role == 'worker' && creep.memory.currentTask == 'upgrading');
+    var builders = _.filter(Game.creeps, (creep) => creep.memory.role == 'worker' && creep.memory.currentTask == 'building');
 
     // Determine which body parts to use based on available energy
     var spawn = Game.spawns['Spawn1'];
@@ -40,44 +41,59 @@ module.exports.loop = function () {
         bodyParts = config.creepBodyParts.basic;
     }
 
-    // Spawn creeps in priority order: harvester > upgrader > builder
-    if (harvesters.length < config.creepCounts.harvester) {
-        var newName = 'Harvester' + Game.time;
-        spawn.spawnCreep(bodyParts.harvester, newName, {
-            memory: { role: 'harvester' }
-        });
-    }
-    else if (upgraders.length < config.creepCounts.upgrader) {
-        var newName = 'Upgrader' + Game.time;
-        spawn.spawnCreep(bodyParts.upgrader, newName, {
-            memory: { role: 'upgrader' }
-        });
-    }
-    else if (builders.length < config.creepCounts.builder) {
-        var newName = 'Builder' + Game.time;
-        spawn.spawnCreep(bodyParts.builder, newName, {
-            memory: { role: 'builder' }
+    // Spawn workers if we need more
+    if (workers.length < config.creepCounts.worker) {
+        // Determine initial task based on colony needs
+        var initialTask = 'harvesting'; // Default to harvesting
+
+        if (harvesters.length >= config.creepCounts.harvester) {
+            if (upgraders.length < config.creepCounts.upgrader) {
+                initialTask = 'upgrading';
+            } else if (builders.length < config.creepCounts.builder) {
+                initialTask = 'building';
+            }
+        }
+
+        var newName = 'Worker' + Game.time;
+        spawn.spawnCreep(bodyParts.worker, newName, {
+            memory: { 
+                role: 'worker',
+                currentTask: initialTask
+            }
         });
     }
 
     if(Game.spawns['Spawn1'].spawning) {
         var spawningCreep = Game.creeps[Game.spawns['Spawn1'].spawning.name];
         Game.spawns['Spawn1'].room.visual.text(
-            '🛠️' + spawningCreep.memory.role,
+            '🛠️' + spawningCreep.memory.role + (spawningCreep.memory.currentTask ? ' (' + spawningCreep.memory.currentTask + ')' : ''),
             Game.spawns['Spawn1'].pos.x + 1,
             Game.spawns['Spawn1'].pos.y,
             {align: 'left', opacity: 0.8});
     }
     for(var name in Game.creeps) {
         var creep = Game.creeps[name];
-        if(creep.memory.role == 'harvester') {
-            roleHarvester.run(creep);
+        if(creep.memory.role == 'worker') {
+            roleWorker.run(creep);
         }
-        if(creep.memory.role == 'upgrader') {
-            roleUpgrader.run(creep);
+        // Support for legacy creeps (if any still exist)
+        else if(creep.memory.role == 'harvester') {
+            // Convert legacy harvester to worker
+            creep.memory.role = 'worker';
+            creep.memory.currentTask = 'harvesting';
+            roleWorker.run(creep);
         }
-        if(creep.memory.role == 'builder') {
-            roleBuilder.run(creep);
+        else if(creep.memory.role == 'upgrader') {
+            // Convert legacy upgrader to worker
+            creep.memory.role = 'worker';
+            creep.memory.currentTask = 'upgrading';
+            roleWorker.run(creep);
+        }
+        else if(creep.memory.role == 'builder') {
+            // Convert legacy builder to worker
+            creep.memory.role = 'worker';
+            creep.memory.currentTask = 'building';
+            roleWorker.run(creep);
         }
     }
 }

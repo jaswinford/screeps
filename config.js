@@ -8,9 +8,10 @@ module.exports = {
      * Creep population settings
      */
     creepCounts: {
-        harvester: 2,
-        upgrader: 1,
-        builder: 3
+        worker: 6,  // Total number of workers (replaces individual role counts)
+        harvester: 2, // Target number of workers doing harvesting
+        upgrader: 1, // Target number of workers doing upgrading
+        builder: 3  // Target number of workers doing building
     },
 
     /**
@@ -20,18 +21,21 @@ module.exports = {
     creepBodyParts: {
         // Basic body parts for early game (300 energy)
         basic: {
+            worker: [WORK, CARRY, MOVE],
             harvester: [WORK, CARRY, MOVE],
             upgrader: [WORK, CARRY, MOVE],
             builder: [WORK, CARRY, MOVE]
         },
         // Standard body parts for mid game (550 energy)
         standard: {
+            worker: [WORK, WORK, CARRY, CARRY, MOVE, MOVE],
             harvester: [WORK, WORK, CARRY, CARRY, MOVE, MOVE],
             upgrader: [WORK, WORK, CARRY, CARRY, MOVE, MOVE],
             builder: [WORK, WORK, CARRY, CARRY, MOVE, MOVE]
         },
         // Advanced body parts for late game (800+ energy)
         advanced: {
+            worker: [WORK, WORK, WORK, CARRY, CARRY, CARRY, MOVE, MOVE, MOVE],
             harvester: [WORK, WORK, WORK, CARRY, CARRY, CARRY, MOVE, MOVE, MOVE],
             upgrader: [WORK, WORK, WORK, CARRY, CARRY, CARRY, MOVE, MOVE, MOVE],
             builder: [WORK, WORK, WORK, CARRY, CARRY, CARRY, MOVE, MOVE, MOVE]
