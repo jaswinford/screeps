@@ -3,12 +3,17 @@ var config = require('config');
 var utils = require('utils');
 
 module.exports.loop = function () {
-    if (Game.cpu.bucket === 10000) {
-        try{
-            Game.cpu.generatePixel();
-        }
-        catch (err) {
-            //We don't really care if we fail to generate a pixel, but we'd like to try.
+    // Use excess CPU to generate pixels based on configuration
+    if (config.cpu.generatePixels && Game.cpu.bucket >= config.cpu.minBucketLevel) {
+        // Only generate pixels if we're above our target bucket level or at max capacity
+        if (Game.cpu.bucket >= config.cpu.targetBucketLevel) {
+            try {
+                Game.cpu.generatePixel();
+                console.log(`Generated a pixel. CPU bucket: ${Game.cpu.bucket}`);
+            }
+            catch (err) {
+                console.log(`Failed to generate pixel: ${err}`);
+            }
         }
     }
     // Check for creep deaths and mark dangerous areas

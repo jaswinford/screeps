@@ -81,3 +81,4 @@ This document contains a prioritized list of tasks for improving the ScreepHive 
 8. [ ] Implement a simple memory cleanup system
 9. [ ] Create a basic defense response using existing towers
 10. [ ] Implement more efficient creep body parts as energy capacity increases
+11. [x] Add logic to use excess CPU to generate Pixels

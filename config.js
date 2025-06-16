@@ -111,5 +111,17 @@ module.exports = {
         duration: 1000,
         // Decay rate for dangerous areas (how much to reduce danger level each tick)
         decayRate: 0.995
+    },
+
+    /**
+     * CPU and Pixel generation settings
+     */
+    cpu: {
+        // Whether to use excess CPU to generate pixels
+        generatePixels: true,
+        // Minimum bucket level before generating pixels (max is 10000)
+        minBucketLevel: 8000,
+        // Target bucket level to maintain (won't generate pixels if below this)
+        targetBucketLevel: 9000
     }
 };
