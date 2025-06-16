@@ -1,5 +1,56 @@
 module.exports = {
     /**
+     * Marks an area as dangerous after a creep death
+     * @param {RoomPosition} position - The position where the creep died
+     * @param {string} roomName - The name of the room
+     */
+    markDangerousArea: function(position, roomName) {
+        // Skip if dangerous area avoidance is disabled
+        const config = require('config');
+        if (!config.dangerousAreas.enabled) {
+            return;
+        }
+
+        // Initialize memory structure if it doesn't exist
+        if (!Memory.dangerousAreas) {
+            Memory.dangerousAreas = {};
+        }
+        if (!Memory.dangerousAreas[roomName]) {
+            Memory.dangerousAreas[roomName] = {};
+        }
+
+        // Mark the death position and surrounding tiles as dangerous
+        const radius = config.dangerousAreas.radius;
+        for (let dx = -radius; dx <= radius; dx++) {
+            for (let dy = -radius; dy <= radius; dy++) {
+                const x = position.x + dx;
+                const y = position.y + dy;
+
+                // Skip positions outside room boundaries
+                if (x < 0 || x > 49 || y < 0 || y > 49) {
+                    continue;
+                }
+
+                const posKey = `${x},${y}`;
+
+                // Set danger level to maximum (1.0)
+                Memory.dangerousAreas[roomName][posKey] = 1.0;
+
+                // Visually mark the dangerous area (optional)
+                if (Game.rooms[roomName]) {
+                    Game.rooms[roomName].visual.circle(x, y, {
+                        fill: 'transparent',
+                        radius: 0.5,
+                        stroke: 'red',
+                        opacity: 0.5
+                    });
+                }
+            }
+        }
+
+        console.log(`Marked area around (${position.x},${position.y}) in ${roomName} as dangerous`);
+    },
+    /**
      * Tracks creep movement on a tile for road building automation
      * @param {RoomPosition} position - The position to track
      * @param {string} roomName - The name of the room
@@ -94,6 +145,7 @@ module.exports = {
         // Track the current position for road building automation
         this.trackTileUsage(creep.pos, creep.room.name);
 
+        // Check if the cached path is still valid
         if (creep.memory._move &&
             creep.memory._move.target === cacheKey &&
             creep.memory._move.task === creep.memory.task && // Check if the task is the same
@@ -106,6 +158,44 @@ module.exports = {
             } else {
                 return moveResult;
             }
+        }
+
+        // Add cost matrix for dangerous areas
+        const config = require('config');
+        if (config.dangerousAreas.enabled && Memory.dangerousAreas && Memory.dangerousAreas[creep.room.name]) {
+            // Create a callback to modify the cost matrix
+            const costCallback = (roomName, costMatrix) => {
+                // Skip if we don't have dangerous areas for this room
+                if (!Memory.dangerousAreas[roomName]) {
+                    return costMatrix;
+                }
+
+                // Create a new cost matrix if one wasn't provided
+                if (!costMatrix) {
+                    costMatrix = new PathFinder.CostMatrix();
+                }
+
+                // Apply cost penalties for dangerous areas
+                for (const posKey in Memory.dangerousAreas[roomName]) {
+                    const [x, y] = posKey.split(',').map(Number);
+                    const dangerLevel = Memory.dangerousAreas[roomName][posKey];
+
+                    // Calculate cost penalty based on danger level
+                    const penalty = Math.ceil(config.dangerousAreas.costPenalty * dangerLevel);
+
+                    // Get current cost and add penalty
+                    const currentCost = costMatrix.get(x, y);
+                    const newCost = Math.min(255, currentCost + penalty); // Max cost is 255
+
+                    // Set the new cost
+                    costMatrix.set(x, y, newCost);
+                }
+
+                return costMatrix;
+            };
+
+            // Add the cost callback to the options
+            opts.costCallback = costCallback;
         }
 
         const moveResult = creep.moveTo(target, {
@@ -128,9 +218,66 @@ module.exports = {
     },
 
     /**
-     * Checks tile usage data and creates road construction sites on frequently used tiles
-     * @returns {number} - The number of road construction sites created
+     * Decays dangerous areas over time and removes them when they expire
      */
+    decayDangerousAreas: function() {
+        const config = require('config');
+
+        // Skip if dangerous area avoidance is disabled
+        if (!config.dangerousAreas.enabled) {
+            return;
+        }
+
+        // Skip if there are no dangerous areas
+        if (!Memory.dangerousAreas) {
+            return;
+        }
+
+        // Process each room's dangerous areas
+        for (const roomName in Memory.dangerousAreas) {
+            // Skip if the room has no dangerous areas
+            if (!Memory.dangerousAreas[roomName] || Object.keys(Memory.dangerousAreas[roomName]).length === 0) {
+                delete Memory.dangerousAreas[roomName];
+                continue;
+            }
+
+            // Get the room object if we have visibility
+            const room = Game.rooms[roomName];
+
+            // Decay all dangerous areas in this room
+            for (const posKey in Memory.dangerousAreas[roomName]) {
+                // Apply decay rate
+                Memory.dangerousAreas[roomName][posKey] *= config.dangerousAreas.decayRate;
+
+                // Round to avoid floating point issues
+                Memory.dangerousAreas[roomName][posKey] = Math.round(Memory.dangerousAreas[roomName][posKey] * 1000) / 1000;
+
+                // Remove entries with very low danger levels
+                if (Memory.dangerousAreas[roomName][posKey] < 0.01) {
+                    delete Memory.dangerousAreas[roomName][posKey];
+                    continue;
+                }
+
+                // Visually mark the dangerous area if we have visibility
+                if (room) {
+                    const [x, y] = posKey.split(',').map(Number);
+                    const opacity = Memory.dangerousAreas[roomName][posKey] * 0.5; // Scale opacity with danger level
+                    room.visual.circle(x, y, {
+                        fill: 'transparent',
+                        radius: 0.5,
+                        stroke: 'red',
+                        opacity: opacity
+                    });
+                }
+            }
+
+            // If all dangerous areas in this room have been removed, clean up the room entry
+            if (Object.keys(Memory.dangerousAreas[roomName]).length === 0) {
+                delete Memory.dangerousAreas[roomName];
+            }
+        }
+    },
+
     buildRoadsOnHighTraffic: function() {
         const config = require('config');
 

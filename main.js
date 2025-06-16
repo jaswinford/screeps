@@ -11,12 +11,31 @@ module.exports.loop = function () {
             //We don't really care if we fail to generate a pixel, but we'd like to try.
         }
     }
+    // Check for creep deaths and mark dangerous areas
     for(var name in Memory.creeps) {
         if(!Game.creeps[name]) {
+            // Check if we have position data for this creep
+            if (Memory.creeps[name].lastPosition) {
+                const pos = Memory.creeps[name].lastPosition;
+                const roomName = pos.roomName;
+
+                // Create a RoomPosition object
+                const position = new RoomPosition(pos.x, pos.y, roomName);
+
+                // Mark the area as dangerous
+                utils.markDangerousArea(position, roomName);
+
+                console.log(`Creep ${name} died at (${pos.x},${pos.y}) in ${roomName}. Marking area as dangerous.`);
+            }
+
+            // Clean up the creep's memory
             delete Memory.creeps[name];
             console.log('Clearing non-existing creep memory:', name);
         }
     }
+
+    // Decay dangerous areas
+    utils.decayDangerousAreas();
 
     // Check for high traffic areas and build roads
     utils.buildRoadsOnHighTraffic();
@@ -73,6 +92,14 @@ module.exports.loop = function () {
     }
     for(var name in Game.creeps) {
         var creep = Game.creeps[name];
+
+        // Store the creep's current position for death detection
+        creep.memory.lastPosition = {
+            x: creep.pos.x,
+            y: creep.pos.y,
+            roomName: creep.room.name
+        };
+
         if(creep.memory.role == 'worker') {
             roleWorker.run(creep);
         }

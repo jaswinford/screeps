@@ -94,5 +94,21 @@ module.exports = {
         maxRoadsPerCheck: 3,
         // Decay rate for tile usage (how much to reduce counts each check interval)
         decayRate: 0.5
+    },
+
+    /**
+     * Dangerous area settings
+     */
+    dangerousAreas: {
+        // Whether dangerous area avoidance is enabled
+        enabled: true,
+        // Radius around death location to mark as dangerous (in tiles)
+        radius: 5,
+        // Cost penalty for pathing through dangerous areas
+        costPenalty: 50,
+        // How long dangerous areas should remain flagged (in ticks)
+        duration: 1000,
+        // Decay rate for dangerous areas (how much to reduce danger level each tick)
+        decayRate: 0.995
     }
 };
