@@ -86,8 +86,9 @@ module.exports = {
     roadAutomation: {
         // Whether road automation is enabled
         enabled: true,
-        // Minimum number of creep movements over a tile before considering building a road
-        threshold: 10,
+        // Minimum cost-weighted usage before considering building a road
+        // This is now based on both traffic count and movement cost
+        threshold: 20,
         // How often to check for new road construction (in ticks)
         checkInterval: 500,
         // Maximum number of roads to build per check interval

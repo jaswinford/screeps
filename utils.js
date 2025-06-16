@@ -54,8 +54,9 @@ module.exports = {
      * Tracks creep movement on a tile for road building automation
      * @param {RoomPosition} position - The position to track
      * @param {string} roomName - The name of the room
+     * @param {Creep} creep - The creep that is moving
      */
-    trackTileUsage: function(position, roomName) {
+    trackTileUsage: function(position, roomName, creep) {
         // Skip tracking if road automation is disabled
         const config = require('config');
         if (!config.roadAutomation.enabled) {
@@ -73,11 +74,29 @@ module.exports = {
         // Create a key for this position
         const posKey = `${position.x},${position.y}`;
 
-        // Increment the usage count for this position
+        // Calculate the movement cost based on terrain and creep fatigue
+        let movementCost = 1; // Base cost
+
+        // Add cost based on creep's fatigue (if available)
+        if (creep && creep.fatigue > 0) {
+            // Normalize fatigue to a reasonable range (1-5)
+            movementCost += Math.min(5, creep.fatigue / 2);
+        }
+
+        // Check terrain type for additional cost
+        const terrain = Game.map.getRoomTerrain(roomName);
+        const terrainType = terrain.get(position.x, position.y);
+
+        // TERRAIN_MASK_WALL = 1, TERRAIN_MASK_SWAMP = 2, TERRAIN_MASK_LAVA = 4
+        if (terrainType === TERRAIN_MASK_SWAMP) {
+            movementCost += 5; // Swamps are much more expensive to move through
+        }
+
+        // Increment the usage count for this position, weighted by movement cost
         if (!Memory.tileUsage[roomName][posKey]) {
-            Memory.tileUsage[roomName][posKey] = 1;
+            Memory.tileUsage[roomName][posKey] = movementCost;
         } else {
-            Memory.tileUsage[roomName][posKey]++;
+            Memory.tileUsage[roomName][posKey] += movementCost;
         }
     },
 
@@ -143,7 +162,7 @@ module.exports = {
         const cacheKey = `${target.x},${target.y},${target.roomName}`;
 
         // Track the current position for road building automation
-        this.trackTileUsage(creep.pos, creep.room.name);
+        this.trackTileUsage(creep.pos, creep.room.name, creep);
 
         // Check if the cached path is still valid
         if (creep.memory._move &&
@@ -284,6 +303,11 @@ module.exports = {
         }
     },
 
+    /**
+     * Checks tile usage data and creates road construction sites on tiles with high movement cost-weighted usage
+     * The likelihood of a tile being turned into a road increases based on both traffic and movement cost
+     * @returns {number} - The number of road construction sites created
+     */
     buildRoadsOnHighTraffic: function() {
         const config = require('config');
 
@@ -308,16 +332,16 @@ module.exports = {
                 continue;
             }
 
-            // Get all positions sorted by usage count (highest first)
+            // Get all positions sorted by movement cost-weighted usage (highest first)
             const positions = [];
             for (const posKey in Memory.tileUsage[roomName]) {
-                const count = Memory.tileUsage[roomName][posKey];
+                const costWeightedUsage = Memory.tileUsage[roomName][posKey];
                 const [x, y] = posKey.split(',').map(Number);
-                positions.push({ x, y, count });
+                positions.push({ x, y, costWeightedUsage });
             }
 
-            // Sort by count (highest first)
-            positions.sort((a, b) => b.count - a.count);
+            // Sort by cost-weighted usage (highest first)
+            positions.sort((a, b) => b.costWeightedUsage - a.costWeightedUsage);
 
             // Build roads on the most frequently used positions
             for (const pos of positions) {
@@ -326,8 +350,8 @@ module.exports = {
                     break;
                 }
 
-                // Skip if usage count is below threshold
-                if (pos.count < config.roadAutomation.threshold) {
+                // Skip if cost-weighted usage is below threshold
+                if (pos.costWeightedUsage < config.roadAutomation.threshold) {
                     continue;
                 }
 
@@ -352,8 +376,8 @@ module.exports = {
                 const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_ROAD);
                 if (result === OK) {
                     roadsBuilt++;
-                    console.log(`Created road construction site at ${pos.x},${pos.y} in ${roomName} (usage: ${pos.count})`);
-                    // Reset the count for this position
+                    console.log(`Created road construction site at ${pos.x},${pos.y} in ${roomName} (cost-weighted usage: ${pos.costWeightedUsage})`);
+                    // Reset the usage for this position
                     Memory.tileUsage[roomName][`${pos.x},${pos.y}`] = 0;
                 }
             }
