@@ -1,7 +1,7 @@
 module.exports = {
     /**
-     * Marks an area as dangerous after a creep death
-     * @param {RoomPosition} position - The position where the creep died
+     * Marks an area as dangerous after a creep is killed
+     * @param {RoomPosition} position - The position where the creep was killed
      * @param {string} roomName - The name of the room
      */
     markDangerousArea: function(position, roomName) {
@@ -180,15 +180,21 @@ module.exports = {
                     const [x, y] = posKey.split(',').map(Number);
                     const dangerLevel = Memory.dangerousAreas[roomName][posKey];
 
-                    // Calculate cost penalty based on danger level
-                    const penalty = Math.ceil(config.dangerousAreas.costPenalty * dangerLevel);
+                    // For workers, completely avoid dangerous tiles by setting cost to 255 (impassable)
+                    if (creep.memory.role === 'worker') {
+                        costMatrix.set(x, y, 255); // Make tile impassable for workers
+                    } else {
+                        // For other creeps, use the penalty-based approach
+                        // Calculate cost penalty based on danger level
+                        const penalty = Math.ceil(config.dangerousAreas.costPenalty * dangerLevel);
 
-                    // Get current cost and add penalty
-                    const currentCost = costMatrix.get(x, y);
-                    const newCost = Math.min(255, currentCost + penalty); // Max cost is 255
+                        // Get current cost and add penalty
+                        const currentCost = costMatrix.get(x, y);
+                        const newCost = Math.min(255, currentCost + penalty); // Max cost is 255
 
-                    // Set the new cost
-                    costMatrix.set(x, y, newCost);
+                        // Set the new cost
+                        costMatrix.set(x, y, newCost);
+                    }
                 }
 
                 return costMatrix;

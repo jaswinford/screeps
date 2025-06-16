@@ -18,14 +18,20 @@ module.exports.loop = function () {
             if (Memory.creeps[name].lastPosition) {
                 const pos = Memory.creeps[name].lastPosition;
                 const roomName = pos.roomName;
+                const ticksToLive = Memory.creeps[name].ticksToLive;
 
                 // Create a RoomPosition object
                 const position = new RoomPosition(pos.x, pos.y, roomName);
 
-                // Mark the area as dangerous
-                utils.markDangerousArea(position, roomName);
-
-                console.log(`Creep ${name} died at (${pos.x},${pos.y}) in ${roomName}. Marking area as dangerous.`);
+                // Only mark the area as dangerous if the creep was killed (ticksToLive > 5)
+                // If ticksToLive is low, it likely died naturally
+                if (ticksToLive > 5) {
+                    // Mark the area as dangerous
+                    utils.markDangerousArea(position, roomName);
+                    console.log(`Creep ${name} was killed at (${pos.x},${pos.y}) in ${roomName} with ${ticksToLive} ticks left. Marking area as dangerous.`);
+                } else {
+                    console.log(`Creep ${name} died naturally at (${pos.x},${pos.y}) in ${roomName} with ${ticksToLive} ticks left. Not marking as dangerous.`);
+                }
             }
 
             // Clean up the creep's memory
@@ -93,12 +99,13 @@ module.exports.loop = function () {
     for(var name in Game.creeps) {
         var creep = Game.creeps[name];
 
-        // Store the creep's current position for death detection
+        // Store the creep's current position and ticksToLive for death detection
         creep.memory.lastPosition = {
             x: creep.pos.x,
             y: creep.pos.y,
             roomName: creep.room.name
         };
+        creep.memory.ticksToLive = creep.ticksToLive;
 
         if(creep.memory.role == 'worker') {
             roleWorker.run(creep);
