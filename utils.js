@@ -1,5 +1,149 @@
 module.exports = {
     /**
+     * Checks if spawn is full and builds additional energy storage if needed
+     * @param {Room} room - The room to check
+     * @returns {boolean} - True if new construction sites were created
+     */
+    buildEnergyStorageWhenSpawnFull: function(room) {
+        // Skip if we don't have visibility in the room
+        if (!room) {
+            return false;
+        }
+
+        // Get the spawn in the room
+        const spawns = room.find(FIND_MY_SPAWNS);
+        if (spawns.length === 0) {
+            return false;
+        }
+
+        const spawn = spawns[0];
+
+        // Check if spawn energy is full
+        if (spawn.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+            return false;
+        }
+
+        // Check if extensions are also full
+        const extensions = room.find(FIND_MY_STRUCTURES, {
+            filter: (structure) => {
+                return structure.structureType === STRUCTURE_EXTENSION &&
+                       structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
+            }
+        });
+
+        // If there are extensions that need energy, don't build more storage yet
+        if (extensions.length > 0) {
+            return false;
+        }
+
+        // Check if we already have a storage structure
+        const storages = room.find(FIND_MY_STRUCTURES, {
+            filter: (structure) => structure.structureType === STRUCTURE_STORAGE
+        });
+
+        // Check if we already have storage construction sites
+        const storageSites = room.find(FIND_CONSTRUCTION_SITES, {
+            filter: (site) => site.structureType === STRUCTURE_STORAGE
+        });
+
+        // If we don't have a storage and no storage construction sites, build one
+        if (storages.length === 0 && storageSites.length === 0) {
+            // Find a suitable position near the spawn
+            const pos = this.findBuildingPosition(spawn.pos, room, 3);
+            if (pos) {
+                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_STORAGE);
+                if (result === OK) {
+                    console.log(`Created storage construction site at ${pos.x},${pos.y} in ${room.name}`);
+                    return true;
+                }
+            }
+        }
+
+        // Check if we need more extensions
+        const extensionCount = room.find(FIND_MY_STRUCTURES, {
+            filter: (structure) => structure.structureType === STRUCTURE_EXTENSION
+        }).length;
+
+        const extensionSites = room.find(FIND_CONSTRUCTION_SITES, {
+            filter: (site) => site.structureType === STRUCTURE_EXTENSION
+        }).length;
+
+        // Get the controller level to determine max extensions
+        const controllerLevel = room.controller ? room.controller.level : 0;
+
+        // Calculate max extensions based on controller level
+        // RCL 2: 5, RCL 3: 10, RCL 4: 20, RCL 5: 30, RCL 6: 40, RCL 7: 50, RCL 8: 60
+        let maxExtensions = 0;
+        if (controllerLevel >= 2) maxExtensions = 5;
+        if (controllerLevel >= 3) maxExtensions = 10;
+        if (controllerLevel >= 4) maxExtensions = 20;
+        if (controllerLevel >= 5) maxExtensions = 30;
+        if (controllerLevel >= 6) maxExtensions = 40;
+        if (controllerLevel >= 7) maxExtensions = 50;
+        if (controllerLevel >= 8) maxExtensions = 60;
+
+        // If we haven't reached max extensions, build more
+        if (extensionCount + extensionSites < maxExtensions) {
+            // Find a suitable position for the extension
+            const pos = this.findBuildingPosition(spawn.pos, room, 2);
+            if (pos) {
+                const result = room.createConstructionSite(pos.x, pos.y, STRUCTURE_EXTENSION);
+                if (result === OK) {
+                    console.log(`Created extension construction site at ${pos.x},${pos.y} in ${room.name}`);
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    },
+
+    /**
+     * Finds a suitable position for building a structure
+     * @param {RoomPosition} centerPos - The position to build around
+     * @param {Room} room - The room to build in
+     * @param {number} range - The range to search around centerPos
+     * @returns {RoomPosition|null} - A suitable position or null if none found
+     */
+    findBuildingPosition: function(centerPos, room, range) {
+        const terrain = room.getTerrain();
+
+        // Check positions in a spiral pattern around the center
+        for (let r = 2; r <= range; r++) {
+            for (let x = -r; x <= r; x++) {
+                for (let y = -r; y <= r; y++) {
+                    // Skip positions that aren't on the edge of the current range
+                    if (Math.abs(x) !== r && Math.abs(y) !== r) {
+                        continue;
+                    }
+
+                    const posX = centerPos.x + x;
+                    const posY = centerPos.y + y;
+
+                    // Skip positions outside room boundaries
+                    if (posX < 1 || posX > 48 || posY < 1 || posY > 48) {
+                        continue;
+                    }
+
+                    // Check if the position is walkable (not a wall)
+                    if (terrain.get(posX, posY) !== TERRAIN_MASK_WALL) {
+                        // Check if the position is empty (no structures or construction sites)
+                        const pos = new RoomPosition(posX, posY, room.name);
+                        const structures = pos.lookFor(LOOK_STRUCTURES);
+                        const constructionSites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+
+                        if (structures.length === 0 && constructionSites.length === 0) {
+                            return pos;
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
+    },
+
+    /**
      * Marks an area as dangerous after a creep is killed
      * @param {RoomPosition} position - The position where the creep was killed
      * @param {string} roomName - The name of the room

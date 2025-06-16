@@ -51,6 +51,11 @@ module.exports.loop = function () {
     // Check for high traffic areas and build roads
     utils.buildRoadsOnHighTraffic();
 
+    // Check if spawn is full and build additional energy storage if needed
+    for (const roomName in Game.rooms) {
+        utils.buildEnergyStorageWhenSpawnFull(Game.rooms[roomName]);
+    }
+
     var workers = _.filter(Game.creeps, (creep) => creep.memory.role == 'worker');
 
     // Count workers by current task
