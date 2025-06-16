@@ -2,6 +2,7 @@ var roleHarvester = require('role.harvester');
 var roleUpgrader = require('role.upgrader');
 var roleBuilder = require('role.builder');
 var config = require('config');
+var utils = require('utils');
 
 module.exports.loop = function () {
     if (Game.cpu.bucket === 10000) {
@@ -18,6 +19,9 @@ module.exports.loop = function () {
             console.log('Clearing non-existing creep memory:', name);
         }
     }
+
+    // Check for high traffic areas and build roads
+    utils.buildRoadsOnHighTraffic();
 
     var harvesters = _.filter(Game.creeps, (creep) => creep.memory.role == 'harvester');
     var builders = _.filter(Game.creeps, (creep) => creep.memory.role == 'builder');

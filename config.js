@@ -44,7 +44,7 @@ module.exports = {
     structures: {
         // Repair threshold (percentage of hits/hitsMax)
         repairThreshold: 0.75,
-        
+
         // Priority order for construction
         buildPriority: [
             STRUCTURE_SPAWN,
@@ -74,5 +74,21 @@ module.exports = {
     memory: {
         // How often to run memory cleanup (in ticks)
         cleanupInterval: 100
+    },
+
+    /**
+     * Road automation settings
+     */
+    roadAutomation: {
+        // Whether road automation is enabled
+        enabled: true,
+        // Minimum number of creep movements over a tile before considering building a road
+        threshold: 10,
+        // How often to check for new road construction (in ticks)
+        checkInterval: 500,
+        // Maximum number of roads to build per check interval
+        maxRoadsPerCheck: 3,
+        // Decay rate for tile usage (how much to reduce counts each check interval)
+        decayRate: 0.5
     }
 };
