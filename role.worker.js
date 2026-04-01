@@ -3,28 +3,35 @@ var config = require('config');
 
 var roleWorker = {
     /**
-     * Determines the most needed role in the colony
+     * Determines the most needed role in the colony.
+     * Accepts pre-computed task counts from the main loop to avoid redundant Game.creeps scans.
      * @param {Room} room - The room to check
-     * @returns {string} - The role that is most needed ('harvester', 'upgrader', or 'builder')
+     * @param {Object} counts - Pre-computed { harvesters, upgraders, builders } lengths
+     * @returns {string} - The role that is most needed ('harvesting', 'upgrading', or 'building')
      */
-    determineRole: function(room) {
-        // Count creeps by role
-        var harvesters = _.filter(Game.creeps, (creep) => creep.memory.role == 'worker' && creep.memory.currentTask == 'harvesting');
-        var upgraders = _.filter(Game.creeps, (creep) => creep.memory.role == 'worker' && creep.memory.currentTask == 'upgrading');
-        var builders = _.filter(Game.creeps, (creep) => creep.memory.role == 'worker' && creep.memory.currentTask == 'building');
+    determineRole: function(room, counts) {
+        // Fall back to a local scan only if counts weren't provided (e.g. called outside main loop)
+        if (!counts) {
+            var allWorkers = _.filter(Game.creeps, (c) => c.memory.role == 'worker');
+            counts = {
+                harvesters: _.filter(allWorkers, (c) => c.memory.currentTask == 'harvesting').length,
+                upgraders:  _.filter(allWorkers, (c) => c.memory.currentTask == 'upgrading').length,
+                builders:   _.filter(allWorkers, (c) => c.memory.currentTask == 'building').length,
+            };
+        }
 
         // Check if we need harvesters (highest priority)
-        if (harvesters.length < config.creepCounts.harvester) {
+        if (counts.harvesters < config.creepCounts.harvester) {
             return 'harvesting';
         }
 
         // Check if we need upgraders (second priority)
-        if (upgraders.length < config.creepCounts.upgrader) {
+        if (counts.upgraders < config.creepCounts.upgrader) {
             return 'upgrading';
         }
 
         // Check if we need builders (third priority)
-        if (builders.length < config.creepCounts.builder) {
+        if (counts.builders < config.creepCounts.builder) {
             return 'building';
         }
 
@@ -47,8 +54,9 @@ var roleWorker = {
     /**
      * Performs harvesting tasks (collecting energy and transferring to structures)
      * @param {Creep} creep - The creep to run the harvesting logic on
+     * @param {Object} counts - Pre-computed task counts
      */
-    runHarvester: function(creep) {
+    runHarvester: function(creep, counts) {
         // Initialize gathering flag if not set
         if(creep.memory.gathering === undefined) {
             creep.memory.gathering = creep.store.getFreeCapacity() > 0;
@@ -85,7 +93,7 @@ var roleWorker = {
             }
             // If no structures need energy, switch to another role
             else {
-                creep.memory.currentTask = this.determineRole(creep.room);
+                creep.memory.currentTask = this.determineRole(creep.room, counts);
                 creep.say('🔄 ' + creep.memory.currentTask);
             }
         }
@@ -94,8 +102,9 @@ var roleWorker = {
     /**
      * Performs upgrading tasks (upgrading the controller)
      * @param {Creep} creep - The creep to run the upgrading logic on
+     * @param {Object} counts - Pre-computed task counts (unused here, kept for API consistency)
      */
-    runUpgrader: function(creep) {
+    runUpgrader: function(creep, counts) {
         // Initialize gathering flag if not set
         if(creep.memory.gathering === undefined) {
             creep.memory.gathering = creep.store[RESOURCE_ENERGY] == 0;
@@ -126,8 +135,9 @@ var roleWorker = {
     /**
      * Performs building tasks (building construction sites and repairing structures)
      * @param {Creep} creep - The creep to run the building logic on
+     * @param {Object} counts - Pre-computed task counts
      */
-    runBuilder: function(creep) {
+    runBuilder: function(creep, counts) {
         // Initialize gathering flag if not set
         if(creep.memory.gathering === undefined) {
             creep.memory.gathering = creep.store[RESOURCE_ENERGY] == 0;
@@ -198,18 +208,18 @@ var roleWorker = {
                 }
                 // If nothing to build or repair, switch to another role
                 else {
-                    creep.memory.currentTask = this.determineRole(creep.room);
+                    creep.memory.currentTask = this.determineRole(creep.room, counts);
                     creep.say('🔄 ' + creep.memory.currentTask);
                 }
             }
         }
     },
 
-    /** @param {Creep} creep **/
-    run: function(creep) {
+    /** @param {Creep} creep @param {Object} counts - Pre-computed task counts **/
+    run: function(creep, counts) {
         // Initialize currentTask if not set
         if(!creep.memory.currentTask) {
-            creep.memory.currentTask = this.determineRole(creep.room);
+            creep.memory.currentTask = this.determineRole(creep.room, counts);
             creep.say('🔄 ' + creep.memory.currentTask);
         }
 
@@ -221,13 +231,13 @@ var roleWorker = {
 
         // Run the appropriate role logic
         if(creep.memory.currentTask === 'harvesting') {
-            this.runHarvester(creep);
+            this.runHarvester(creep, counts);
         }
         else if(creep.memory.currentTask === 'upgrading') {
-            this.runUpgrader(creep);
+            this.runUpgrader(creep, counts);
         }
         else if(creep.memory.currentTask === 'building') {
-            this.runBuilder(creep);
+            this.runBuilder(creep, counts);
         }
     }
 };

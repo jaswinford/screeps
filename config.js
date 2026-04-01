@@ -49,6 +49,9 @@ module.exports = {
         // Repair threshold (percentage of hits/hitsMax)
         repairThreshold: 0.75,
 
+        // How often to check for new energy storage / extension construction (in ticks)
+        buildCheckInterval: 50,
+
         // Priority order for construction
         buildPriority: [
             STRUCTURE_SPAWN,

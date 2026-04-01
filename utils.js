@@ -1,12 +1,23 @@
+var config = require('config');
+
+// Module-level terrain cache: { [roomName]: { tick: number, terrain: RoomTerrain } }
+var _terrainCache = {};
+
 module.exports = {
     /**
-     * Checks if spawn is full and builds additional energy storage if needed
+     * Checks if spawn is full and builds additional energy storage if needed.
+     * Throttled to run once every config.structures.buildCheckInterval ticks.
      * @param {Room} room - The room to check
      * @returns {boolean} - True if new construction sites were created
      */
     buildEnergyStorageWhenSpawnFull: function(room) {
         // Skip if we don't have visibility in the room
         if (!room) {
+            return false;
+        }
+
+        // Throttle: only run every buildCheckInterval ticks
+        if (Game.time % config.structures.buildCheckInterval !== 0) {
             return false;
         }
 
@@ -99,7 +110,8 @@ module.exports = {
     },
 
     /**
-     * Finds a suitable position for building a structure
+     * Finds a suitable position for building a structure.
+     * Uses a single room.find() + Set lookup instead of per-tile lookFor() calls.
      * @param {RoomPosition} centerPos - The position to build around
      * @param {Room} room - The room to build in
      * @param {number} range - The range to search around centerPos
@@ -107,6 +119,13 @@ module.exports = {
      */
     findBuildingPosition: function(centerPos, room, range) {
         const terrain = room.getTerrain();
+
+        // Pre-fetch all occupied positions once instead of calling lookFor() per tile
+        const occupied = new Set();
+        const structures = room.find(FIND_STRUCTURES);
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        for (const s of structures) occupied.add(`${s.pos.x},${s.pos.y}`);
+        for (const s of sites) occupied.add(`${s.pos.x},${s.pos.y}`);
 
         // Check positions in a spiral pattern around the center
         for (let r = 2; r <= range; r++) {
@@ -125,16 +144,10 @@ module.exports = {
                         continue;
                     }
 
-                    // Check if the position is walkable (not a wall)
-                    if (terrain.get(posX, posY) !== TERRAIN_MASK_WALL) {
-                        // Check if the position is empty (no structures or construction sites)
-                        const pos = new RoomPosition(posX, posY, room.name);
-                        const structures = pos.lookFor(LOOK_STRUCTURES);
-                        const constructionSites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
-
-                        if (structures.length === 0 && constructionSites.length === 0) {
-                            return pos;
-                        }
+                    // Check if the position is walkable (not a wall) and unoccupied
+                    if (terrain.get(posX, posY) !== TERRAIN_MASK_WALL &&
+                        !occupied.has(`${posX},${posY}`)) {
+                        return new RoomPosition(posX, posY, room.name);
                     }
                 }
             }
@@ -144,20 +157,20 @@ module.exports = {
     },
 
     /**
-     * Marks an area as dangerous after a creep is killed
+     * Marks an area as dangerous after a creep is killed.
+     * Positions are stored as integer keys (x * 50 + y) for efficient access.
      * @param {RoomPosition} position - The position where the creep was killed
      * @param {string} roomName - The name of the room
      */
     markDangerousArea: function(position, roomName) {
         // Skip if dangerous area avoidance is disabled
-        const config = require('config');
         if (!config.dangerousAreas.enabled) {
             return;
         }
 
-        // Initialize memory structure if it doesn't exist
-        if (!Memory.dangerousAreas) {
-            Memory.dangerousAreas = {};
+        // Reset any stale string-key data (migration: wipe old format on first use)
+        if (!Memory.dangerousAreas || Memory.dangerousAreas._fmt !== 1) {
+            Memory.dangerousAreas = { _fmt: 1 };
         }
         if (!Memory.dangerousAreas[roomName]) {
             Memory.dangerousAreas[roomName] = {};
@@ -175,34 +188,23 @@ module.exports = {
                     continue;
                 }
 
-                const posKey = `${x},${y}`;
-
-                // Set danger level to maximum (1.0)
-                Memory.dangerousAreas[roomName][posKey] = 1.0;
-
-                // Visually mark the dangerous area (optional)
-                if (Game.rooms[roomName]) {
-                    Game.rooms[roomName].visual.circle(x, y, {
-                        fill: 'transparent',
-                        radius: 0.5,
-                        stroke: 'red',
-                        opacity: 0.5
-                    });
-                }
+                // Store as integer key: x * 50 + y
+                Memory.dangerousAreas[roomName][x * 50 + y] = 1.0;
             }
         }
 
         console.log(`Marked area around (${position.x},${position.y}) in ${roomName} as dangerous`);
     },
+
     /**
-     * Tracks creep movement on a tile for road building automation
+     * Tracks creep movement on a tile for road building automation.
+     * Caches the terrain object per room per tick to avoid repeated getRoomTerrain() calls.
      * @param {RoomPosition} position - The position to track
      * @param {string} roomName - The name of the room
      * @param {Creep} creep - The creep that is moving
      */
     trackTileUsage: function(position, roomName, creep) {
         // Skip tracking if road automation is disabled
-        const config = require('config');
         if (!config.roadAutomation.enabled) {
             return;
         }
@@ -227,13 +229,17 @@ module.exports = {
             movementCost += Math.min(5, creep.fatigue / 2);
         }
 
-        // Check terrain type for additional cost
-        const terrain = Game.map.getRoomTerrain(roomName);
-        const terrainType = terrain.get(position.x, position.y);
+        // Check terrain type — use per-tick cached terrain object
+        let cached = _terrainCache[roomName];
+        if (!cached || cached.tick !== Game.time) {
+            _terrainCache[roomName] = { tick: Game.time, terrain: Game.map.getRoomTerrain(roomName) };
+            cached = _terrainCache[roomName];
+        }
+        const terrainType = cached.terrain.get(position.x, position.y);
 
-        // TERRAIN_MASK_WALL = 1, TERRAIN_MASK_SWAMP = 2, TERRAIN_MASK_LAVA = 4
+        // TERRAIN_MASK_SWAMP = 2 — swamps are much more expensive to move through
         if (terrainType === TERRAIN_MASK_SWAMP) {
-            movementCost += 5; // Swamps are much more expensive to move through
+            movementCost += 5;
         }
 
         // Increment the usage count for this position, weighted by movement cost
@@ -245,31 +251,20 @@ module.exports = {
     },
 
     /**
-     * Collects energy from various sources in priority order: tombstones, dropped energy, sources
+     * Collects energy from various sources in priority order: tombstones, dropped energy, sources.
+     * Short-circuits: only calls room.find() for the next tier if the current tier has nothing.
      * @param {Creep} creep - The creep that will collect energy
-     * @returns {boolean} - True if the creep successfully collected or moved to collect energy, false otherwise
+     * @returns {boolean} - True if the creep successfully collected or moved to collect energy
      */
     collectEnergy: function(creep) {
-        if(creep.store.getFreeCapacity() === 0) {
+        if (creep.store.getFreeCapacity() === 0) {
             return false;
         }
 
+        // Priority 1: tombstones
         var tombstones = creep.room.find(FIND_TOMBSTONES, {
-            filter: (tombstone) => {
-                return tombstone.store[RESOURCE_ENERGY] > 0;
-            }
+            filter: (tombstone) => tombstone.store[RESOURCE_ENERGY] > 0
         });
-        var droppedEnergy = creep.room.find(FIND_DROPPED_RESOURCES, {
-            filter: (resource) => {
-                return resource.resourceType == RESOURCE_ENERGY;
-            }
-        });
-        var sources = creep.room.find(FIND_SOURCES, {
-            filter: (source) => {
-                return source.energy > 0;
-            }
-        });
-
         if (tombstones.length > 0) {
             var target = creep.pos.findClosestByPath(tombstones);
             if (creep.withdraw(target, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
@@ -277,16 +272,26 @@ module.exports = {
             }
             return true;
         }
-        else if (droppedEnergy.length > 0) {
+
+        // Priority 2: dropped energy
+        var droppedEnergy = creep.room.find(FIND_DROPPED_RESOURCES, {
+            filter: (resource) => resource.resourceType == RESOURCE_ENERGY
+        });
+        if (droppedEnergy.length > 0) {
             var target = creep.pos.findClosestByPath(droppedEnergy);
             if (creep.pickup(target, RESOURCE_ENERGY) == ERR_NOT_IN_RANGE) {
                 this.moveTo(creep, target);
             }
             return true;
         }
-        else if (sources.length > 0) {
+
+        // Priority 3: energy sources
+        var sources = creep.room.find(FIND_SOURCES, {
+            filter: (source) => source.energy > 0
+        });
+        if (sources.length > 0) {
             var target = creep.pos.findClosestByPath(sources);
-            if(creep.harvest(target) == ERR_NOT_IN_RANGE) {
+            if (creep.harvest(target) == ERR_NOT_IN_RANGE) {
                 this.moveTo(creep, target, {visualizePathStyle: {stroke: '#ffaa00'}});
             }
             return true;
@@ -296,22 +301,27 @@ module.exports = {
     },
 
     /**
-     * Moves a creep to a target with path caching for efficiency
+     * Moves a creep to a target with Screeps' built-in path reuse and danger-zone cost matrix.
+     * Path cache key uses target.pos (or target directly for RoomPosition objects).
+     * Cache invalidation correctly checks memory.currentTask.
      * @param {Creep} creep - The creep to move
-     * @param {RoomObject} target - The target to move to
+     * @param {RoomObject|RoomPosition} target - The target to move to
      * @param {Object} opts - Additional options for moveTo
      * @returns {number} - The result of the move operation
      */
     moveTo: function(creep, target, opts = {}) {
-        const cacheKey = `${target.x},${target.y},${target.roomName}`;
-
         // Track the current position for road building automation
         this.trackTileUsage(creep.pos, creep.room.name, creep);
+
+        // Build a stable cache key: RoomPositions have x/y/roomName directly;
+        // other RoomObjects store position in .pos
+        const pos = target.pos || target;
+        const cacheKey = `${pos.x},${pos.y},${pos.roomName}`;
 
         // Check if the cached path is still valid
         if (creep.memory._move &&
             creep.memory._move.target === cacheKey &&
-            creep.memory._move.task === creep.memory.task && // Check if the task is the same
+            creep.memory._move.task === creep.memory.currentTask &&
             Game.time - creep.memory._move.tick < 20 &&
             !creep.fatigue
         ) {
@@ -323,39 +333,30 @@ module.exports = {
             }
         }
 
-        // Add cost matrix for dangerous areas
-        const config = require('config');
-        if (config.dangerousAreas.enabled && Memory.dangerousAreas && Memory.dangerousAreas[creep.room.name]) {
-            // Create a callback to modify the cost matrix
+        // Add cost matrix for dangerous areas if any exist for this room
+        if (config.dangerousAreas.enabled && Memory.dangerousAreas &&
+            Memory.dangerousAreas._fmt === 1 && Memory.dangerousAreas[creep.room.name]) {
+
             const costCallback = (roomName, costMatrix) => {
-                // Skip if we don't have dangerous areas for this room
                 if (!Memory.dangerousAreas[roomName]) {
                     return costMatrix;
                 }
-
-                // Create a new cost matrix if one wasn't provided
                 if (!costMatrix) {
                     costMatrix = new PathFinder.CostMatrix();
                 }
 
-                // Apply cost penalties for dangerous areas
-                for (const posKey in Memory.dangerousAreas[roomName]) {
-                    const [x, y] = posKey.split(',').map(Number);
-                    const dangerLevel = Memory.dangerousAreas[roomName][posKey];
+                for (const key in Memory.dangerousAreas[roomName]) {
+                    // Integer key: x * 50 + y
+                    const k = Number(key);
+                    const x = Math.floor(k / 50);
+                    const y = k % 50;
+                    const dangerLevel = Memory.dangerousAreas[roomName][key];
 
-                    // For workers, completely avoid dangerous tiles by setting cost to 255 (impassable)
                     if (creep.memory.role === 'worker') {
-                        costMatrix.set(x, y, 255); // Make tile impassable for workers
+                        costMatrix.set(x, y, 255);
                     } else {
-                        // For other creeps, use the penalty-based approach
-                        // Calculate cost penalty based on danger level
                         const penalty = Math.ceil(config.dangerousAreas.costPenalty * dangerLevel);
-
-                        // Get current cost and add penalty
-                        const currentCost = costMatrix.get(x, y);
-                        const newCost = Math.min(255, currentCost + penalty); // Max cost is 255
-
-                        // Set the new cost
+                        const newCost = Math.min(255, costMatrix.get(x, y) + penalty);
                         costMatrix.set(x, y, newCost);
                     }
                 }
@@ -363,7 +364,6 @@ module.exports = {
                 return costMatrix;
             };
 
-            // Add the cost callback to the options
             opts.costCallback = costCallback;
         }
 
@@ -373,88 +373,97 @@ module.exports = {
             ...opts
         });
 
+        // Cache the path returned by the engine (via _move written by Screeps' own moveTo)
+        // We only need to store the target+task+tick so cache invalidation works correctly;
+        // the actual path bytes are stored by Screeps in creep.memory._move automatically
+        // when reusePath > 0. We overwrite just the fields we need to track.
         if (moveResult === OK) {
-            creep.memory._move = {
-                target: cacheKey,
-                path: creep.pos.findPathTo(target, opts),
-                tick: Game.time,
-                task: creep.memory.task // Store the current task in the cached path data
-            };
-        } else if (moveResult == ERR_NO_PATH){
+            // Screeps has already written creep.memory._move.path via reusePath;
+            // patch the target key and task so our validation logic works next tick.
+            if (!creep.memory._move) creep.memory._move = {};
+            creep.memory._move.target = cacheKey;
+            creep.memory._move.task = creep.memory.currentTask;
+            creep.memory._move.tick = Game.time;
+        } else if (moveResult === ERR_NO_PATH) {
             delete creep.memory._move;
         }
+
         return moveResult;
     },
 
     /**
-     * Decays dangerous areas over time and removes them when they expire
+     * Decays dangerous areas over time and removes them when they expire.
+     * Visuals are drawn only every 10 ticks to reduce overhead.
      */
     decayDangerousAreas: function() {
-        const config = require('config');
-
         // Skip if dangerous area avoidance is disabled
         if (!config.dangerousAreas.enabled) {
             return;
         }
 
-        // Skip if there are no dangerous areas
-        if (!Memory.dangerousAreas) {
+        // Skip if there are no dangerous areas (or data is in old string-key format)
+        if (!Memory.dangerousAreas || Memory.dangerousAreas._fmt !== 1) {
             return;
         }
 
+        const drawVisuals = Game.time % 10 === 0;
+
         // Process each room's dangerous areas
         for (const roomName in Memory.dangerousAreas) {
-            // Skip if the room has no dangerous areas
-            if (!Memory.dangerousAreas[roomName] || Object.keys(Memory.dangerousAreas[roomName]).length === 0) {
+            if (roomName === '_fmt') continue;
+
+            const roomData = Memory.dangerousAreas[roomName];
+            const keys = Object.keys(roomData);
+
+            if (keys.length === 0) {
                 delete Memory.dangerousAreas[roomName];
                 continue;
             }
 
-            // Get the room object if we have visibility
-            const room = Game.rooms[roomName];
+            // Get the room object if we have visibility (only needed for visuals)
+            const room = drawVisuals ? Game.rooms[roomName] : null;
 
-            // Decay all dangerous areas in this room
-            for (const posKey in Memory.dangerousAreas[roomName]) {
-                // Apply decay rate
-                Memory.dangerousAreas[roomName][posKey] *= config.dangerousAreas.decayRate;
-
-                // Round to avoid floating point issues
-                Memory.dangerousAreas[roomName][posKey] = Math.round(Memory.dangerousAreas[roomName][posKey] * 1000) / 1000;
+            let remaining = 0;
+            for (const key in roomData) {
+                // Decay
+                roomData[key] *= config.dangerousAreas.decayRate;
+                roomData[key] = Math.round(roomData[key] * 1000) / 1000;
 
                 // Remove entries with very low danger levels
-                if (Memory.dangerousAreas[roomName][posKey] < 0.01) {
-                    delete Memory.dangerousAreas[roomName][posKey];
+                if (roomData[key] < 0.01) {
+                    delete roomData[key];
                     continue;
                 }
 
-                // Visually mark the dangerous area if we have visibility
+                remaining++;
+
+                // Draw visuals every 10 ticks only
                 if (room) {
-                    const [x, y] = posKey.split(',').map(Number);
-                    const opacity = Memory.dangerousAreas[roomName][posKey] * 0.5; // Scale opacity with danger level
+                    const k = Number(key);
+                    const x = Math.floor(k / 50);
+                    const y = k % 50;
                     room.visual.circle(x, y, {
                         fill: 'transparent',
                         radius: 0.5,
                         stroke: 'red',
-                        opacity: opacity
+                        opacity: roomData[key] * 0.5
                     });
                 }
             }
 
-            // If all dangerous areas in this room have been removed, clean up the room entry
-            if (Object.keys(Memory.dangerousAreas[roomName]).length === 0) {
+            // Clean up room entry if all areas have expired
+            if (remaining === 0) {
                 delete Memory.dangerousAreas[roomName];
             }
         }
     },
 
     /**
-     * Checks tile usage data and creates road construction sites on tiles with high movement cost-weighted usage
-     * The likelihood of a tile being turned into a road increases based on both traffic and movement cost
+     * Checks tile usage data and creates road construction sites on tiles with high
+     * movement cost-weighted usage.
      * @returns {number} - The number of road construction sites created
      */
     buildRoadsOnHighTraffic: function() {
-        const config = require('config');
-
         // Skip if road automation is disabled
         if (!config.roadAutomation.enabled) {
             return 0;
@@ -505,7 +514,6 @@ module.exports = {
                 const structures = position.lookFor(LOOK_STRUCTURES);
                 const hasRoad = structures.some(s => s.structureType === STRUCTURE_ROAD);
                 if (hasRoad) {
-                    // Reduce the count since there's already a road here
                     Memory.tileUsage[roomName][`${pos.x},${pos.y}`] = 0;
                     continue;
                 }
@@ -521,7 +529,6 @@ module.exports = {
                 if (result === OK) {
                     roadsBuilt++;
                     console.log(`Created road construction site at ${pos.x},${pos.y} in ${roomName} (cost-weighted usage: ${pos.costWeightedUsage})`);
-                    // Reset the usage for this position
                     Memory.tileUsage[roomName][`${pos.x},${pos.y}`] = 0;
                 }
             }
@@ -529,10 +536,8 @@ module.exports = {
             // Apply decay to all positions
             for (const posKey in Memory.tileUsage[roomName]) {
                 Memory.tileUsage[roomName][posKey] *= config.roadAutomation.decayRate;
-                // Round to avoid floating point issues
                 Memory.tileUsage[roomName][posKey] = Math.round(Memory.tileUsage[roomName][posKey] * 10) / 10;
 
-                // Remove entries with very low counts to keep memory clean
                 if (Memory.tileUsage[roomName][posKey] < 0.1) {
                     delete Memory.tileUsage[roomName][posKey];
                 }
