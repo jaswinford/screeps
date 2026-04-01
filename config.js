@@ -95,7 +95,7 @@ module.exports = {
         // How often to check for new road construction (in ticks)
         checkInterval: 500,
         // Maximum number of roads to build per check interval
-        maxRoadsPerCheck: 3,
+        maxRoadsPerCheck: 1,
         // Decay rate for tile usage (how much to reduce counts each check interval)
         decayRate: 0.5
     },

@@ -166,15 +166,20 @@ var roleWorker = {
                 // Use priority order from config
                 const priorityOrder = config.structures.buildPriority;
 
+                // Find the spawn to use as a focus point for tie-breaking
+                const spawns = creep.room.find(FIND_MY_SPAWNS);
+                const anchor = spawns.length ? spawns[0] : creep;
+
                 // Sort targets by priority
                 targets.sort((a, b) => {
                     const priorityA = priorityOrder.indexOf(a.structureType);
                     const priorityB = priorityOrder.indexOf(b.structureType);
 
                     if (priorityA === priorityB) {
-                        // If same priority, choose the closest one
-                        const distanceA = creep.pos.getRangeTo(a);
-                        const distanceB = creep.pos.getRangeTo(b);
+                        // If same priority, choose the one closest to the spawn so all
+                        // builders converge on the same site and finish it quickly.
+                        const distanceA = anchor.pos.getRangeTo(a);
+                        const distanceB = anchor.pos.getRangeTo(b);
                         return distanceA - distanceB;
                     }
 
